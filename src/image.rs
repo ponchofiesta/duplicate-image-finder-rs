@@ -1,12 +1,16 @@
+use iced::Subscription;
 use iced::subscription;
 use image::GenericImage;
 use image::ImageBuffer;
 use imageproc::stats::histogram;
+use std::borrow::Borrow;
 use std::ops;
 use std::path::Path;
 use std::path::PathBuf;
 
 use crate::Error;
+use crate::gui::Message;
+use crate::multiprocessing;
 
 pub type HistogramValueType = u32;
 pub type Histogram = [HistogramValueType; 256];
@@ -18,6 +22,12 @@ pub struct ImageInfo {
     pub error: Option<String>,
     pub histogram: Option<RgbHistogram>,
     pub checked: bool,
+}
+
+impl Default for ImageInfo {
+    fn default() -> Self {
+        Self { path: Default::default(), error: Default::default(), histogram: Default::default(), checked: Default::default() }
+    }
 }
 
 impl ops::Sub for ImageInfo {
@@ -41,6 +51,12 @@ impl ops::Sub for ImageInfo {
     }
 }
 
+pub fn analyze_new(paths: &[&Path]) -> Subscription<Progress> {
+    subscription::unfold(0, State::Ready(paths), move |state| {
+        analyze(state)
+    })
+}
+
 pub async fn analyze<'a>(state: State<'a>) -> (Progress, State<'a>) {
     match state {
         State::Ready(paths) => {
@@ -56,7 +72,7 @@ pub async fn analyze<'a>(state: State<'a>) -> (Progress, State<'a>) {
                 ),
                 Err(_) => (Progress::Errored, State::Finished),
             }
-        }
+        },
         State::Analyzing { total, progress } => match response.chunk().await {
             Ok(Some(chunk)) => {
                 let progress = progress + chunk.len() as u64;
@@ -89,7 +105,7 @@ pub enum Progress {
 }
 
 pub enum State<'a> {
-    Ready(&'a [&'a dyn AsRef<Path>]),
+    Ready(&'a [&'a Path]),
     Analyzing { total: usize, progress: usize },
     Finished,
 }
@@ -98,11 +114,32 @@ struct Analyse {
 
 }
 
-pub async fn get_histograms(paths: &[&dyn AsRef<Path>]) -> Result<Vec<ImageInfo>, Error> {
-    todo!()
+pub async fn get_histograms(paths: &[&Path]) -> Result<Vec<ImageInfo>, Error> {
+    let mut imageinfos = vec![];
+    let pool = multiprocessing::ThreadPool::new();
+    for result in pool.imap(get_imageinfo_from_image, paths) {
+        imageinfos.push(result);
+    }
+    Ok(imageinfos)
 }
 
-pub fn get_histograms_from_image<P: AsRef<Path>>(path: P) -> Result<RgbHistogram, Error> {
+pub fn get_imageinfo_from_image(path: &Path) -> ImageInfo {
+    let histograms = get_histograms_from_image(path);
+    let mut imageinfo = ImageInfo {
+        path: path.into(),
+        ..Default::default()
+    };
+    match histograms {
+        Ok(histograms) => imageinfo.histogram = Some(histograms),
+        Err(error) => imageinfo.error = match error {
+            Error::LoadHistogram(msg) => Some(msg),
+            _ => Some("unknown error".into()),
+        },
+    };
+    imageinfo
+}
+
+pub fn get_histograms_from_image(path: &Path) -> Result<RgbHistogram, Error> {
     match image::open(path) {
         Ok(img) => {
             let mut buffer = ImageBuffer::new(img.width(), img.height());

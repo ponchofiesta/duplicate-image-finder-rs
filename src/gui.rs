@@ -142,7 +142,7 @@ enum AnalyseState {
 }
 
 pub struct Analyze<'a> {
-    paths: &'a [&'a dyn AsRef<Path>],
+    paths: &'a [&'a Path],
     state: AnalyseState,
 }
 
