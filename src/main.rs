@@ -1,80 +1,25 @@
-use iced::{
-    self, executor,
-    widget::{button, column, container, row, text},
-    Application, Command, Element, Settings, Theme,
-};
-use std::path::{Path, PathBuf};
+use std::io;
 
-#[derive(Default)]
-struct DupApp {
-    state: State,
-    path: Option<PathBuf>,
-}
+use gui::DupApp;
+use iced::{Application, Settings};
 
-enum State {
-    Open,
-    Select,
-    Analyzing,
-    Delete,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        State::Open
-    }
-}
+mod finder;
+mod gui;
+mod image;
+mod widgets;
 
 #[derive(Debug, Clone)]
-enum Message {
-    OpenFolder,
-    FolderOpened(Result<PathBuf, Error>),
-}
-
-impl Application for DupApp {
-    type Executor = executor::Default;
-    type Message = Message;
-    type Theme = Theme;
-    type Flags = ();
-
-    fn new(_flags: Self::Flags) -> (Self, iced::Command<Self::Message>) {
-        (DupApp::default(), Command::none())
-    }
-
-    fn title(&self) -> String {
-        "Duplicate Image Finder".into()
-    }
-
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
-        match message {
-            Message::OpenFolder => Command::perform(open_folder(), Message::FolderOpened),
-            Message::FolderOpened(path) => Command::none(),
-        }
-    }
-
-    fn view(&self) -> Element<Self::Message> {
-        container(column!(row!(
-            button("Open").on_press(Message::OpenFolder),
-            match self.path.as_deref().map(Path::to_str) {
-                Some(path) => text(path),
-                None => text("-"),
-            }
-        )))
-        .into()
-    }
-}
-
-#[derive(Debug, Clone)]
-enum Error {
+pub enum Error {
     DialogClosed,
+    NoImageFound,
+    Io(String),
+    LoadHistogram(String),
 }
 
-async fn open_folder() -> Result<PathBuf, Error> {
-    let handle = rfd::AsyncFileDialog::new()
-        .set_title("Open image folder")
-        .pick_folder()
-        .await
-        .ok_or(Error::DialogClosed)?;
-    Ok(handle.path().to_owned())
+impl From<io::Error> for Error {
+    fn from(value: io::Error) -> Self {
+        Error::Io(value.to_string())
+    }
 }
 
 fn main() -> iced::Result {
