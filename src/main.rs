@@ -7,7 +7,6 @@ mod finder;
 mod gui;
 mod image;
 mod widgets;
-mod multiprocessing;
 
 #[derive(Debug, Clone)]
 pub enum Error {
