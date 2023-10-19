@@ -8,16 +8,17 @@ use iced::{
     Application, Command, Element, Settings, Theme,
 };
 use iced::{subscription, Subscription};
+use std::sync::{Arc, Mutex};
 use std::{
     io,
     path::{Path, PathBuf},
 };
 
 #[derive(Default)]
-pub struct DupApp<'a> {
+pub struct DupApp {
     state: State,
     folder_path: Option<PathBuf>,
-    analyze: Option<Analyze<'a>>,
+    analyze: Option<Analyze>,
     error: Option<Error>,
 }
 
@@ -45,7 +46,7 @@ pub enum Message {
     ImagesLoaded(Result<Vec<ImageInfo>, Error>),
 }
 
-impl<'a> Application for DupApp<'a> {
+impl Application for DupApp {
     type Executor = executor::Default;
     type Message = Message;
     type Theme = Theme;
@@ -82,27 +83,26 @@ impl<'a> Application for DupApp<'a> {
                 }
             },
             Message::Analyse => {
-                if let Some(analyze) = self.analyze {
+                if let Some(ref mut analyze) = self.analyze {
                     analyze.start();
                 }
                 Command::none()
-            },
+            }
             Message::AnalyseProgressed(progress) => {
-                if let Some(mut analyze) = self.analyze {
+                if let Some(ref mut analyze) = self.analyze {
                     analyze.progress(progress);
                 }
                 Command::none()
-            },
+            }
             _ => Command::none(),
         }
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        if let Some(analyze) = self.analyze {
+        if let Some(ref analyze) = self.analyze {
             return Subscription::batch(vec![analyze.subscription()]);
         }
         Subscription::none()
-
     }
 
     fn view(&self) -> Element<Self::Message> {
@@ -128,7 +128,6 @@ async fn open_folder() -> Result<PathBuf, Error> {
 }
 
 async fn load_folder(path: PathBuf) -> Result<Vec<ImageInfo>, Error> {
-
     Ok(vec![])
     //Err(Error::NoImageFound)
 }
@@ -141,17 +140,17 @@ enum AnalyseState {
     Errored,
 }
 
-pub struct Analyze<'a> {
-    paths: &'a [&'a Path],
+pub struct Analyze {
+    paths: &'static [&'static Path],
     state: AnalyseState,
 }
 
-impl<'a> Analyze<'a> {
+impl Analyze {
     pub fn total(&self) -> usize {
         self.paths.len()
     }
 
-    pub fn start(&self) {
+    pub fn start(&mut self) {
         match self.state {
             AnalyseState::Idle { .. }
             | AnalyseState::Finished { .. }
@@ -184,16 +183,9 @@ impl<'a> Analyze<'a> {
     pub fn subscription(&self) -> Subscription<Message> {
         match self.state {
             AnalyseState::Analyzing { .. } => {
-                subscription::unfold(0, image::State::Ready(self.paths), move |state| {
-                    image::analyze(state)
-                })
-                .map(Message::AnalyseProgressed)
+                image::analyze_new(self.paths).map(Message::AnalyseProgressed)
             }
             _ => Subscription::none(),
         }
-        // match self.state {
-        //     State::Analyzing { .. } => image::analyze(self.state).map(Message::ImagesLoaded),
-        //     _ => Subscription::none(),
-        // }
     }
 }

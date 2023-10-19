@@ -1,16 +1,19 @@
-use iced::Subscription;
 use iced::subscription;
+use iced::Subscription;
 use image::GenericImage;
 use image::ImageBuffer;
 use imageproc::stats::histogram;
-use std::borrow::Borrow;
 use std::ops;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::mpsc::channel;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
+use std::sync::Mutex;
+use threadpool::ThreadPool;
 
 use crate::Error;
-use crate::gui::Message;
-use crate::multiprocessing;
 
 pub type HistogramValueType = u32;
 pub type Histogram = [HistogramValueType; 256];
@@ -26,7 +29,12 @@ pub struct ImageInfo {
 
 impl Default for ImageInfo {
     fn default() -> Self {
-        Self { path: Default::default(), error: Default::default(), histogram: Default::default(), checked: Default::default() }
+        Self {
+            path: Default::default(),
+            error: Default::default(),
+            histogram: Default::default(),
+            checked: Default::default(),
+        }
     }
 }
 
@@ -51,42 +59,43 @@ impl ops::Sub for ImageInfo {
     }
 }
 
-pub fn analyze_new(paths: &[&Path]) -> Subscription<Progress> {
-    subscription::unfold(0, State::Ready(paths), move |state| {
-        analyze(state)
-    })
+pub fn analyze_new(paths: &'static [&Path]) -> Subscription<Progress> {
+    subscription::unfold(0, State::Ready(paths), move |state| analyze(state))
 }
 
-pub async fn analyze<'a>(state: State<'a>) -> (Progress, State<'a>) {
+pub async fn analyze(state: State) -> (Progress, State) {
     match state {
         State::Ready(paths) => {
-            let response = get_histograms(paths).await;
-
-            match response {
-                Ok(images) => (
-                    Progress::Started,
-                    State::Analyzing {
-                        total: images.len(),
-                        progress: 0,
-                    },
-                ),
-                Err(_) => (Progress::Errored, State::Finished),
+            let mut analyzer = Analyse::new(paths);
+            analyzer.start();
+            (
+                Progress::Started,
+                State::Analyzing {
+                    analyzer,
+                    total: paths.len(),
+                    progress: 0,
+                },
+            )
+        }
+        State::Analyzing {
+            analyzer,
+            total,
+            progress: _,
+        } => {
+            let progress = analyzer.get_progress();
+            let percentage = (progress as f32 / total as f32) * 100.0;
+            if percentage == 100.0 {
+                return (Progress::Finished, State::Finished);
             }
-        },
-        State::Analyzing { total, progress } => match response.chunk().await {
-            Ok(Some(chunk)) => {
-                let progress = progress + chunk.len() as u64;
-
-                let percentage = (progress as f32 / total as f32) * 100.0;
-
-                (
-                    Progress::Advanced(percentage, "test".into()),
-                    State::Analyzing { total, progress },
-                )
-            }
-            Ok(None) => (Progress::Finished, State::Finished),
-            Err(_) => (Progress::Errored, State::Finished),
-        },
+            (
+                Progress::Advanced(percentage, "test".into()),
+                State::Analyzing {
+                    analyzer,
+                    total,
+                    progress,
+                },
+            )
+        }
         State::Finished => {
             // We do not let the stream die, as it would start a
             // new download repeatedly if the user is not careful
@@ -104,23 +113,73 @@ pub enum Progress {
     Errored,
 }
 
-pub enum State<'a> {
-    Ready(&'a [&'a Path]),
-    Analyzing { total: usize, progress: usize },
+pub enum State {
+    Ready(&'static [&'static Path]),
+    Analyzing {
+        analyzer: Analyse,
+        total: usize,
+        progress: usize,
+    },
     Finished,
 }
 
 struct Analyse {
-
+    paths: &'static [&'static Path],
+    progress: Arc<Mutex<usize>>,
+    imageinfos: Arc<Mutex<Option<Vec<ImageInfo>>>>,
+    receiver: Option<Receiver<ImageInfo>>,
 }
 
-pub async fn get_histograms(paths: &[&Path]) -> Result<Vec<ImageInfo>, Error> {
-    let mut imageinfos = vec![];
-    let pool = multiprocessing::ThreadPool::new();
-    for result in pool.imap(get_imageinfo_from_image, paths) {
-        imageinfos.push(result);
+impl Analyse {
+    pub fn new(paths: &'static [&'static Path]) -> Self {
+        Analyse {
+            paths,
+            progress: Arc::new(Mutex::new(0)),
+            imageinfos: Arc::new(Mutex::new(None)),
+            receiver: None,
+        }
     }
-    Ok(imageinfos)
+
+    pub fn start(&mut self) {
+        let (tx, rx) = channel::<ImageInfo>();
+        self.receiver = Some(rx);
+        tokio::task::spawn(get_histograms(self.paths, tx));
+    }
+
+    pub fn get_receiver(&self) -> Option<&Receiver<ImageInfo>> {
+        self.receiver.as_ref()
+    }
+
+    pub fn get_progress(&self) -> usize {
+        *self.progress.lock().unwrap()
+    }
+
+    pub fn get_total(&self) -> usize {
+        self.paths.len()
+    }
+}
+
+pub async fn get_histograms(paths: &'static [&Path], tx: Sender<ImageInfo>) {
+    //let mut imageinfos = vec![];
+    let cpu_count = num_cpus::get();
+    let pool = ThreadPool::new(cpu_count);
+    //let (tx, rx) = channel();
+
+    for path in paths {
+        let tx = tx.clone();
+        pool.execute(move || {
+            let imageinfo = get_imageinfo_from_image(path);
+            tx.send(imageinfo)
+                .expect("channel will be there waiting for the pool");
+        });
+    }
+
+    // for imageinfo in rx.iter() {
+    //     *self.progress.lock().unwrap() += 1;
+    //     imageinfos.push(imageinfo);
+    // }
+
+    //Ok(imageinfos)
 }
 
 pub fn get_imageinfo_from_image(path: &Path) -> ImageInfo {
@@ -131,10 +190,12 @@ pub fn get_imageinfo_from_image(path: &Path) -> ImageInfo {
     };
     match histograms {
         Ok(histograms) => imageinfo.histogram = Some(histograms),
-        Err(error) => imageinfo.error = match error {
-            Error::LoadHistogram(msg) => Some(msg),
-            _ => Some("unknown error".into()),
-        },
+        Err(error) => {
+            imageinfo.error = match error {
+                Error::LoadHistogram(msg) => Some(msg),
+                _ => Some("unknown error".into()),
+            }
+        }
     };
     imageinfo
 }
