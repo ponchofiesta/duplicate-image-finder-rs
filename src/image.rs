@@ -3,6 +3,8 @@ use iced::Subscription;
 use image::GenericImage;
 use image::ImageBuffer;
 use imageproc::stats::histogram;
+use tokio::task::JoinHandle;
+use std::default;
 use std::ops;
 use std::path::Path;
 use std::path::PathBuf;
@@ -123,27 +125,27 @@ pub enum State {
     Finished,
 }
 
+#[derive(Default)]
 struct Analyse {
     paths: &'static [&'static Path],
     progress: Arc<Mutex<usize>>,
     imageinfos: Arc<Mutex<Option<Vec<ImageInfo>>>>,
     receiver: Option<Receiver<ImageInfo>>,
+    task: Option<JoinHandle<()>>,
 }
 
 impl Analyse {
     pub fn new(paths: &'static [&'static Path]) -> Self {
         Analyse {
             paths,
-            progress: Arc::new(Mutex::new(0)),
-            imageinfos: Arc::new(Mutex::new(None)),
-            receiver: None,
+            ..Default::default()
         }
     }
 
     pub fn start(&mut self) {
         let (tx, rx) = channel::<ImageInfo>();
         self.receiver = Some(rx);
-        tokio::task::spawn(get_histograms(self.paths, tx));
+        self.task = Some(tokio::task::spawn(get_histograms(self.paths, tx)));
     }
 
     pub fn get_receiver(&self) -> Option<&Receiver<ImageInfo>> {

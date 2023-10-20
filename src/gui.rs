@@ -1,18 +1,15 @@
-use crate::image;
 use crate::image::ImageInfo;
-use crate::widgets::{icon, icon_button};
+use crate::widgets::icon_button;
 use crate::Error;
+use crate::{finder, image, util};
+use iced::Subscription;
 use iced::{
     self, executor, font,
-    widget::{button, column, container, row, text},
-    Application, Command, Element, Settings, Theme,
+    widget::{column, container, row, text},
+    Application, Command, Element, Theme,
 };
-use iced::{subscription, Subscription};
-use std::sync::{Arc, Mutex};
-use std::{
-    io,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
+use util::debug;
 
 #[derive(Default)]
 pub struct DupApp {
@@ -41,7 +38,8 @@ pub enum Message {
     FontLoaded(Result<(), font::Error>),
     FolderOpen,
     FolderOpened(Result<PathBuf, Error>),
-    Analyse,
+    ImagesFound(Result<Vec<PathBuf>, Error>),
+    // Analyse,
     AnalyseProgressed(image::Progress),
     ImagesLoaded(Result<Vec<ImageInfo>, Error>),
 }
@@ -53,6 +51,7 @@ impl Application for DupApp {
     type Flags = ();
 
     fn new(_flags: Self::Flags) -> (Self, iced::Command<Self::Message>) {
+        debug!("app new");
         (
             DupApp::default(),
             Command::batch(vec![font::load(
@@ -67,27 +66,48 @@ impl Application for DupApp {
     }
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+        debug!("event: {message:?}");
         match message {
             Message::FolderOpen => Command::perform(open_folder(), Message::FolderOpened),
             Message::FolderOpened(path) => match path {
                 Ok(path) => {
                     self.folder_path = Some(path);
-                    Command::perform(
-                        load_folder(self.folder_path.as_ref().unwrap().clone()),
-                        Message::ImagesLoaded,
-                    )
+                    
+                    let path = self.folder_path.as_ref().unwrap().clone();
+
+                    //let path = self.folder_path.as_deref().unwrap();
+                    Command::perform(finder::find_images(path), Message::ImagesFound)
+
+                    //self.analyze = Analyze {paths: path}
+
+                    // Command::perform(
+                    //     load_folder(self.folder_path.as_ref().unwrap().clone()),
+                    //     Message::ImagesLoaded,
+                    // )
+
+                    // if let Some(ref mut analyze) = self.analyze {
+                    //     debug!("analyze.start();");
+                    //     analyze.start();
+                    // }
+                    //Command::none()
                 }
                 Err(error) => {
                     self.error = Some(error);
                     Command::none()
                 }
             },
-            Message::Analyse => {
-                if let Some(ref mut analyze) = self.analyze {
-                    analyze.start();
+            Message::ImagesFound(result) => match result {
+                Ok(paths) => {
+                    let analyze = Analyze {
+                        paths,
+                        state: AnalyseState::Idle,
+                    };
+                    self.analyze = Some(analyze);
+                    self.analyze.as_mut().unwrap().start();
+                    Command::none()
                 }
-                Command::none()
-            }
+                Err(_) => Command::none(),
+            },
             Message::AnalyseProgressed(progress) => {
                 if let Some(ref mut analyze) = self.analyze {
                     analyze.progress(progress);
@@ -127,11 +147,6 @@ async fn open_folder() -> Result<PathBuf, Error> {
     Ok(handle.path().to_owned())
 }
 
-async fn load_folder(path: PathBuf) -> Result<Vec<ImageInfo>, Error> {
-    Ok(vec![])
-    //Err(Error::NoImageFound)
-}
-
 #[derive(Debug)]
 enum AnalyseState {
     Idle,
@@ -141,7 +156,7 @@ enum AnalyseState {
 }
 
 pub struct Analyze {
-    paths: &'static [&'static Path],
+    paths: Vec<PathBuf>,
     state: AnalyseState,
 }
 
@@ -167,7 +182,7 @@ impl Analyze {
                 image::Progress::Started => {
                     *progress = 0.0;
                 }
-                image::Progress::Advanced(percentage, msg) => {
+                image::Progress::Advanced(percentage, _msg) => {
                     *progress = percentage;
                 }
                 image::Progress::Finished => {
@@ -183,7 +198,7 @@ impl Analyze {
     pub fn subscription(&self) -> Subscription<Message> {
         match self.state {
             AnalyseState::Analyzing { .. } => {
-                image::analyze_new(self.paths).map(Message::AnalyseProgressed)
+                image::analyze_new(self.paths.iter().map(|path| path.as_path())).map(Message::AnalyseProgressed)
             }
             _ => Subscription::none(),
         }

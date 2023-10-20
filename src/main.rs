@@ -1,12 +1,12 @@
-use std::io;
-
-use gui::DupApp;
-use iced::{Application, Settings};
-
 mod finder;
 mod gui;
 mod image;
+mod util;
 mod widgets;
+
+use gui::DupApp;
+use iced::{Application, Settings};
+use std::io;
 
 #[derive(Debug, Clone)]
 pub enum Error {
