@@ -1,12 +1,13 @@
 mod finder;
 mod gui;
 mod image;
-mod util;
 mod widgets;
 
+use eframe::egui;
 use gui::DupApp;
-use iced::{Application, Settings};
+use ::image::ImageError;
 use std::io;
+use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub enum Error {
@@ -14,6 +15,13 @@ pub enum Error {
     NoImageFound,
     Io(String),
     LoadHistogram(String),
+    Image(String),
+}
+
+impl From<ImageError> for Error {
+    fn from(value: ImageError) -> Self {
+        Error::Image(value.to_string())
+    }
 }
 
 impl From<io::Error> for Error {
@@ -22,6 +30,17 @@ impl From<io::Error> for Error {
     }
 }
 
-fn main() -> iced::Result {
-    DupApp::run(Settings::default())
+fn main() -> Result<(), eframe::Error> {
+    tracing_subscriber::fmt::init();
+    debug!("hallo");
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([640.0, 480.0]),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Duplicate Image Finder",
+        options,
+        Box::new(|cc| Box::new(DupApp::new(cc))),
+    )
 }

@@ -1,20 +1,19 @@
-use iced::subscription;
-use iced::Subscription;
+use eframe::egui;
+use image::imageops::thumbnail;
 use image::GenericImage;
 use image::ImageBuffer;
+use image::ImageResult;
+use image::Rgba;
 use imageproc::stats::histogram;
-use tokio::task::JoinHandle;
-use std::default;
+use tracing::debug;
+use std::io;
 use std::ops;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::mpsc::channel;
-use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
-use std::sync::Mutex;
 use threadpool::ThreadPool;
 
+use crate::gui::Message;
 use crate::Error;
 
 pub type HistogramValueType = u32;
@@ -61,131 +60,28 @@ impl ops::Sub for ImageInfo {
     }
 }
 
-pub fn analyze_new(paths: &'static [&Path]) -> Subscription<Progress> {
-    subscription::unfold(0, State::Ready(paths), move |state| analyze(state))
-}
-
-pub async fn analyze(state: State) -> (Progress, State) {
-    match state {
-        State::Ready(paths) => {
-            let mut analyzer = Analyse::new(paths);
-            analyzer.start();
-            (
-                Progress::Started,
-                State::Analyzing {
-                    analyzer,
-                    total: paths.len(),
-                    progress: 0,
-                },
-            )
-        }
-        State::Analyzing {
-            analyzer,
-            total,
-            progress: _,
-        } => {
-            let progress = analyzer.get_progress();
-            let percentage = (progress as f32 / total as f32) * 100.0;
-            if percentage == 100.0 {
-                return (Progress::Finished, State::Finished);
-            }
-            (
-                Progress::Advanced(percentage, "test".into()),
-                State::Analyzing {
-                    analyzer,
-                    total,
-                    progress,
-                },
-            )
-        }
-        State::Finished => {
-            // We do not let the stream die, as it would start a
-            // new download repeatedly if the user is not careful
-            // in case of errors.
-            iced::futures::future::pending().await
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum Progress {
-    Started,
-    Advanced(f32, String),
-    Finished,
-    Errored,
-}
-
-pub enum State {
-    Ready(&'static [&'static Path]),
-    Analyzing {
-        analyzer: Analyse,
-        total: usize,
-        progress: usize,
-    },
-    Finished,
-}
-
-#[derive(Default)]
-struct Analyse {
-    paths: &'static [&'static Path],
-    progress: Arc<Mutex<usize>>,
-    imageinfos: Arc<Mutex<Option<Vec<ImageInfo>>>>,
-    receiver: Option<Receiver<ImageInfo>>,
-    task: Option<JoinHandle<()>>,
-}
-
-impl Analyse {
-    pub fn new(paths: &'static [&'static Path]) -> Self {
-        Analyse {
-            paths,
-            ..Default::default()
-        }
-    }
-
-    pub fn start(&mut self) {
-        let (tx, rx) = channel::<ImageInfo>();
-        self.receiver = Some(rx);
-        self.task = Some(tokio::task::spawn(get_histograms(self.paths, tx)));
-    }
-
-    pub fn get_receiver(&self) -> Option<&Receiver<ImageInfo>> {
-        self.receiver.as_ref()
-    }
-
-    pub fn get_progress(&self) -> usize {
-        *self.progress.lock().unwrap()
-    }
-
-    pub fn get_total(&self) -> usize {
-        self.paths.len()
-    }
-}
-
-pub async fn get_histograms(paths: &'static [&Path], tx: Sender<ImageInfo>) {
-    //let mut imageinfos = vec![];
+pub fn get_histograms(paths: &[PathBuf], tx: Sender<Message>, context: &egui::Context) {
     let cpu_count = num_cpus::get();
     let pool = ThreadPool::new(cpu_count);
-    //let (tx, rx) = channel();
 
     for path in paths {
+        let path = path.clone();
         let tx = tx.clone();
+        let repaint_signal = context.clone();
         pool.execute(move || {
             let imageinfo = get_imageinfo_from_image(path);
-            tx.send(imageinfo)
+            tx.send(Message::ImageAnalyzed(imageinfo))
                 .expect("channel will be there waiting for the pool");
+            repaint_signal.request_repaint();
         });
     }
-
-    // for imageinfo in rx.iter() {
-    //     *self.progress.lock().unwrap() += 1;
-    //     imageinfos.push(imageinfo);
-    // }
-
-    //Ok(imageinfos)
+    pool.join();
+    tx.send(Message::ImagesAnalyzed).expect("Message not sent");
+    context.request_repaint();
 }
 
-pub fn get_imageinfo_from_image(path: &Path) -> ImageInfo {
-    let histograms = get_histograms_from_image(path);
+pub fn get_imageinfo_from_image(path: PathBuf) -> ImageInfo {
+    let histograms = get_histograms_from_image(&path);
     let mut imageinfo = ImageInfo {
         path: path.into(),
         ..Default::default()
@@ -212,4 +108,31 @@ pub fn get_histograms_from_image(path: &Path) -> Result<RgbHistogram, Error> {
         }
         Err(error) => Err(Error::LoadHistogram(error.to_string())),
     }
+}
+
+pub fn get_thumbnails(paths: &[PathBuf], tx: Sender<Message>, context: &egui::Context) {
+    let cpu_count = num_cpus::get();
+    let pool = ThreadPool::new(cpu_count);
+
+    for path in paths {
+        let path = path.clone();
+        let tx = tx.clone();
+        let repaint_signal = context.clone();
+        pool.execute(move || {
+            let image_buffer = get_thumbnail(&path);
+            tx.send(Message::ThumbnailCreated((path.display().to_string(), image_buffer)))
+                .expect("channel will be there waiting for the pool");
+            repaint_signal.request_repaint();
+        });
+    }
+    pool.join();
+    tx.send(Message::ThumbnailsCreated).expect("Message not sent");
+    context.request_repaint();
+}
+
+fn get_thumbnail(path: &PathBuf) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, Error> {
+    debug!("get_thumbnail {}", path.display());
+    let img = image::open(path)?;
+    let image_buffer = thumbnail(&img, 100, 100);
+    Ok(image_buffer)
 }

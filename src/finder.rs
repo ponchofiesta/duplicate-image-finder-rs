@@ -1,12 +1,8 @@
-use std::{path::{PathBuf, Path}};
-
+use crate::Error;
+use std::path::{Path, PathBuf};
 use walkdir;
 
-use crate::{image::{RgbHistogram, ImageInfo}, Error};
-
-
-
-pub async fn find_images<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>, Error> {
+pub fn find_images<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>, Error> {
     const EXTENSIONS: [&'static str; 5] = [".jpg", ".jpeg", ".png", ".bmp", ".gif"];
     let files = walkdir::WalkDir::new(path)
         .follow_links(true)
@@ -19,8 +15,4 @@ pub async fn find_images<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>, Error>
         })
         .collect();
     Ok(files)
-}
-
-pub async fn load_images(paths: &Vec<PathBuf>) -> Result<Vec<ImageInfo>, Error> {
-    todo!()
 }
