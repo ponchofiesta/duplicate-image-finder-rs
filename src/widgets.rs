@@ -1,8 +1,10 @@
 use eframe::{
     egui::{Image, ProgressBar, Ui},
-    epaint::Vec2,
+    epaint::{Vec2},
 };
-use image::{imageops::thumbnail, ImageBuffer};
+use image::{ImageBuffer, Rgba};
+
+use crate::image::ImageInfo;
 
 #[derive(PartialEq)]
 pub struct Progress {
@@ -30,11 +32,12 @@ pub fn progress(ui: &mut Ui, progress: &Progress) {
     });
 }
 
-pub fn selectable_image(ui: &mut Ui, path: &str, checked: &mut bool, text: &str) {
+pub fn selectable_image(ui: &mut Ui, imageinfo: &mut ImageInfo) {
     ui.vertical(|ui| {
-        let url = format!("file://{}", path);
-        ui.add(Image::new(url).max_size(Vec2::new(100., 100.)));
-        ui.checkbox(checked, text);
+        // let url = format!("file://{}", path);
+        let path = &imageinfo.path.display().to_string();
+        ui.add(Image::from_bytes(path.clone(), imageinfo.thumbnail));
+        ui.checkbox(&mut imageinfo.checked, path);
     });
 }
 

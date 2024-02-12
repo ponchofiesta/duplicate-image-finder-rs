@@ -14,7 +14,7 @@ pub enum Error {
     DialogClosed,
     NoImageFound,
     Io(String),
-    LoadHistogram(String),
+    ImageLoad(String),
     Image(String),
 }
 

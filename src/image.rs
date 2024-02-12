@@ -1,8 +1,11 @@
 use eframe::egui;
 use image::imageops::thumbnail;
+use image::DynamicImage;
 use image::GenericImage;
+use image::GenericImageView;
 use image::ImageBuffer;
 use image::ImageResult;
+use image::Rgb;
 use image::Rgba;
 use imageproc::stats::histogram;
 use tracing::debug;
@@ -25,6 +28,7 @@ pub struct ImageInfo {
     pub path: PathBuf,
     pub error: Option<String>,
     pub histogram: Option<RgbHistogram>,
+    pub thumbnail: Vec<u8>,
     pub checked: bool,
 }
 
@@ -34,6 +38,7 @@ impl Default for ImageInfo {
             path: Default::default(),
             error: Default::default(),
             histogram: Default::default(),
+            thumbnail: vec![],
             checked: Default::default(),
         }
     }
@@ -81,33 +86,31 @@ pub fn get_histograms(paths: &[PathBuf], tx: Sender<Message>, context: &egui::Co
 }
 
 pub fn get_imageinfo_from_image(path: PathBuf) -> ImageInfo {
-    let histograms = get_histograms_from_image(&path);
     let mut imageinfo = ImageInfo {
         path: path.into(),
         ..Default::default()
     };
-    match histograms {
-        Ok(histograms) => imageinfo.histogram = Some(histograms),
+    
+    // Load image file
+    let img = match image::open(path) {
+        Ok(img) => img,
         Err(error) => {
-            imageinfo.error = match error {
-                Error::LoadHistogram(msg) => Some(msg),
-                _ => Some("unknown error".into()),
-            }
-        }
+            imageinfo.error = Some(format!("{error:?}"));
+            return imageinfo;
+        },
     };
-    imageinfo
-}
 
-pub fn get_histograms_from_image(path: &Path) -> Result<RgbHistogram, Error> {
-    match image::open(path) {
-        Ok(img) => {
-            let mut buffer = ImageBuffer::new(img.width(), img.height());
-            buffer.copy_from(&img, 0, 0).unwrap();
-            let histograms = histogram(&buffer);
-            Ok(histograms.channels)
-        }
-        Err(error) => Err(Error::LoadHistogram(error.to_string())),
-    }
+    // Load histogram
+    let mut buffer = ImageBuffer::new(img.width(), img.height());
+    buffer.copy_from(&img, 0, 0).unwrap();
+    let histograms = histogram(&buffer);
+    imageinfo.histogram = Some(histograms.channels);
+
+    // Create thumbnail
+    let thumb = thumbnail(&img, 100, 100);
+    imageinfo.thumbnail = thumb.into_vec();
+
+    imageinfo
 }
 
 pub fn get_thumbnails(paths: &[PathBuf], tx: Sender<Message>, context: &egui::Context) {

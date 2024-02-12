@@ -172,7 +172,7 @@ impl DupApp {
 
     fn render(&mut self, ctx: &egui::Context) {
         match self.state {
-            State::Analyzing(ref progress) => {
+            State::Analyzing(ref progress) | State::CreatingThumbnails(ref progress) => {
                 egui::CentralPanel::default().show(&ctx, |ui| {
                     widgets::progress(ui, progress);
                 });
@@ -181,12 +181,7 @@ impl DupApp {
                 egui::CentralPanel::default().show(&ctx, |ui| {
                     ui.horizontal(|ui| {
                         self.images.iter_mut().for_each(|imageinfo| {
-                            widgets::selectable_image(
-                                ui,
-                                &imageinfo.path.display().to_string(),
-                                &mut imageinfo.checked,
-                                "text",
-                            )
+                            widgets::selectable_image(ui, imageinfo)
                         });
                     });
                 });
