@@ -11,6 +11,8 @@ use imageproc::stats::histogram;
 use tracing::debug;
 use std::io;
 use std::ops;
+use std::ops::Deref;
+use std::ops::Sub;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -20,8 +22,62 @@ use crate::gui::Message;
 use crate::Error;
 
 pub type HistogramValueType = u32;
-pub type Histogram = [HistogramValueType; 256];
-pub type RgbHistogram = Vec<Histogram>;
+#[derive(Debug, Clone)]
+//pub type Histogram = [HistogramValueType; 256];
+pub struct Histogram([HistogramValueType; 256]);
+
+impl Deref for Histogram {
+    type Target = [HistogramValueType; 256];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Iterator for Histogram {
+    type Item = HistogramValueType;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next()
+    }
+}
+
+//pub type RgbHistogram = Vec<Histogram>;
+#[derive(Debug, Clone)]
+pub struct RgbHistogram(Vec<Histogram>);
+
+impl Deref for RgbHistogram {
+    type Target = Vec<Histogram>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Iterator for RgbHistogram {
+    type Item = Histogram;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next()
+    }
+}
+
+impl Sub for RgbHistogram {
+    type Output = u64;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        let mut diff = 0;
+        if self.len() != rhs.len() {
+            return Self::Output::MAX;
+        }
+        for (color, _) in self.enumerate() {
+            for (a, b) in self[color].zip(rhs[color]) {
+                diff += (a as i64 - b as i64).abs() as u64;
+            }
+        }
+        diff
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ImageInfo {
