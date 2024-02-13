@@ -1,5 +1,5 @@
 use crate::{image::ImageInfo, Error};
-use std::path::{Path, PathBuf};
+use std::{collections::HashSet, ops::Deref, path::{Path, PathBuf}};
 use walkdir;
 
 pub fn find_images<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>, Error> {
@@ -17,35 +17,46 @@ pub fn find_images<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>, Error> {
     Ok(files)
 }
 
-pub fn compare_images<'a>(images: &'a [&'a ImageInfo]) -> Vec<Pair<'a>> {
-    let mut pairs = vec![];
-    images
+pub fn compare_images<'a>(images: &'a [&'a ImageInfo], threshold: u32) -> Vec<Pair<'a>> {
+    let mut pairs: Vec<Pair<'a>> = vec![];
+    let pairs = images
         .iter()
         .zip(images)
-        .filter(|(a, b)| !std::ptr::eq(a, b))
-        .map(|(a, b)| Pair::new(a, b, a.histogram - b.histogram))
+        .filter(|(a, b)| !std::ptr::eq(a, b) && a.histogram.is_some() && b.histogram.is_some())
+        .map(|(a, b)| Pair::new(a, b, a.histogram.unwrap() - b.histogram.unwrap()))
+        .collect();
+    pairs
+}
 
-    // pairs = []
-    // for i, a in enumerate(histograms):
-    //     for b in histograms[i+1:]:
-    //         pair = Pair(a=a, b=b, diff=None)
-    //         pairs.append(pair)
+pub fn get_groups<'a>(pairs: &'a Vec<Pair<'a>>) -> Vec<ImageInfoGroup<'a>> {
+    let mut groups: Vec<ImageInfoGroup> = vec![];
+    for pair in pairs {
+        let mut pair_in_groups = vec![];
 
-    // # Get all diffs
-    // status = "Comparing files..."
-    // self._progress_handler(0, f"{status} (2/2)")
-    // diffs = []
-    // with ThreadPool() as pool:
-    //     total = len(pairs)
-    //     for i, diff in enumerate(pool.imap_unordered(self.get_diff, pairs)):
-    //         if self.cancel:
-    //             pool.terminate()
-    //             return ([], [])
-    //         self._progress_handler(int(i / total * 100), f"{status} (2/2)")
-    //         if diff.diff is not None and diff.diff < threshold:
-    //             diffs.append(diff)
+        // Search items in all groups
+        for (i, group) in groups.iter().enumerate() {
+            if group.contains(&pair.a) || group.contains(&pair.b) {
+                pair_in_groups.push(i);
+            }
+        }
 
-    // groups = self.get_groups(diffs)
+        // If matching items were found in multiple groups, merge those groups
+        if pair_in_groups.len() > 1 {
+            for group_id in pair_in_groups.iter().skip(1).rev() {
+                groups[pair_in_groups[0]].extend(groups[*group_id].iter());
+                groups.remove(*group_id);
+            }
+        }
+
+        // Add items to the groups
+        if pair_in_groups.len() > 0 {
+            groups[pair_in_groups[0]].extend([pair.a, pair.b]);
+        } else {
+            groups.push(ImageInfoGroup::from_vec(&[pair.a, pair.b]));
+        }
+    }
+    
+    groups
 }
 
 pub struct Pair<'a> {
@@ -60,4 +71,24 @@ impl<'a> Pair<'a> {
     }
 }
 
-pub struct ImageInfoGroup {}
+pub struct ImageInfoGroup<'a>(HashSet<&'a ImageInfo>);
+
+impl<'a> Deref for ImageInfoGroup<'a> {
+    type Target = HashSet<&'a ImageInfo>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'a> ImageInfoGroup<'a> {
+    pub fn new() -> Self {
+        ImageInfoGroup(HashSet::new())
+    }
+
+    pub fn from_vec(values: &[&ImageInfo]) -> Self {
+        let mut group = ImageInfoGroup::new();
+        group.extend(values);
+        group
+    }
+}

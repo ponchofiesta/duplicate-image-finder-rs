@@ -1,22 +1,17 @@
 use eframe::egui;
 use image::imageops::thumbnail;
-use image::DynamicImage;
 use image::GenericImage;
-use image::GenericImageView;
 use image::ImageBuffer;
-use image::ImageResult;
-use image::Rgb;
 use image::Rgba;
 use imageproc::stats::histogram;
-use tracing::debug;
-use std::io;
+use std::hash::Hash;
 use std::ops;
 use std::ops::Deref;
 use std::ops::Sub;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use threadpool::ThreadPool;
+use tracing::debug;
 
 use crate::gui::Message;
 use crate::Error;
@@ -100,6 +95,20 @@ impl Default for ImageInfo {
     }
 }
 
+impl PartialEq for ImageInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
+impl Eq for ImageInfo {}
+
+impl Hash for ImageInfo {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
+    }
+}
+
 impl ops::Sub for ImageInfo {
     type Output = u32;
 
@@ -138,7 +147,6 @@ pub fn get_histograms(paths: &[PathBuf], tx: Sender<Message>, context: &egui::Co
     }
     pool.join();
     tx.send(Message::ImagesAnalyzed).expect("Message not sent");
-    context.request_repaint();
 }
 
 pub fn get_imageinfo_from_image(path: PathBuf) -> ImageInfo {
@@ -146,14 +154,14 @@ pub fn get_imageinfo_from_image(path: PathBuf) -> ImageInfo {
         path: path.into(),
         ..Default::default()
     };
-    
+
     // Load image file
     let img = match image::open(path) {
         Ok(img) => img,
         Err(error) => {
             imageinfo.error = Some(format!("{error:?}"));
             return imageinfo;
-        },
+        }
     };
 
     // Load histogram
@@ -179,13 +187,17 @@ pub fn get_thumbnails(paths: &[PathBuf], tx: Sender<Message>, context: &egui::Co
         let repaint_signal = context.clone();
         pool.execute(move || {
             let image_buffer = get_thumbnail(&path);
-            tx.send(Message::ThumbnailCreated((path.display().to_string(), image_buffer)))
-                .expect("channel will be there waiting for the pool");
+            tx.send(Message::ThumbnailCreated((
+                path.display().to_string(),
+                image_buffer,
+            )))
+            .expect("channel will be there waiting for the pool");
             repaint_signal.request_repaint();
         });
     }
     pool.join();
-    tx.send(Message::ThumbnailsCreated).expect("Message not sent");
+    tx.send(Message::ThumbnailsCreated)
+        .expect("Message not sent");
     context.request_repaint();
 }
 

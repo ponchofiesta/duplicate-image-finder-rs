@@ -1,8 +1,7 @@
-use eframe::{
-    egui::{Image, ProgressBar, Ui},
-    epaint::{Vec2},
-};
-use image::{ImageBuffer, Rgba};
+use eframe::
+    egui::{Image, ProgressBar, Ui}
+;
+
 
 use crate::image::ImageInfo;
 

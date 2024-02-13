@@ -1,9 +1,10 @@
+use crate::finder::ImageInfoGroup;
 use crate::image::ImageInfo;
 use crate::widgets::Progress;
 use crate::{finder, image};
 use crate::{widgets, Error};
 
-use eframe::egui::{self, Image, Layout};
+use eframe::egui::{self, Layout};
 use eframe::App;
 use ::image::{ImageBuffer, Rgba};
 
@@ -14,7 +15,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use tracing::debug;
 
-pub struct DupApp {
+pub struct DupApp<'a> {
     context: egui::Context,
     state: State,
     sender: Sender<Message>,
@@ -23,6 +24,7 @@ pub struct DupApp {
     image_paths: Vec<PathBuf>,
     images: Vec<ImageInfo>,
     thumbnails: HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>>,
+    groups: Vec<ImageInfoGroup<'a>>,
     //analyze: Option<Analyze>,
     // error: Option<Error>,
 }
@@ -46,7 +48,7 @@ fn load_icon_font(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-impl DupApp {
+impl<'a> DupApp<'a> {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         load_icon_font(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -62,6 +64,7 @@ impl DupApp {
             image_paths: vec![],
             images: vec![],
             thumbnails: HashMap::new(),
+            groups: vec![],
         }
     }
 
@@ -151,6 +154,8 @@ impl DupApp {
         let context = self.context.clone();
         thread::spawn(move || {
             image::get_histograms(&paths, tx, &context);
+            let pairs = finder::compare_images(images, 10_000_000);
+            let groups = finder::get_groups(&pairs);
             context.request_repaint();
         });
     }
@@ -211,7 +216,7 @@ impl DupApp {
     }
 }
 
-impl App for DupApp {
+impl<'a> App for DupApp<'a> {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         self.handle_messages();
         self.render(ctx);
