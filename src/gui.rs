@@ -154,8 +154,8 @@ impl<'a> DupApp<'a> {
         let context = self.context.clone();
         thread::spawn(move || {
             image::get_histograms(&paths, tx, &context);
-            let pairs = finder::compare_images(images, 10_000_000);
-            let groups = finder::get_groups(&pairs);
+            // let pairs = finder::compare_images(images, 10_000_000);
+            // let groups = finder::get_groups(&pairs);
             context.request_repaint();
         });
     }

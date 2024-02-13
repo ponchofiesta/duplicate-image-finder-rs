@@ -49,28 +49,40 @@ impl Deref for RgbHistogram {
     }
 }
 
-impl Iterator for RgbHistogram {
-    type Item = Histogram;
+// impl Iterator for RgbHistogram {
+//     type Item = Histogram;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next()
-    }
-}
+//     fn next(&mut self) -> Option<Self::Item> {
+//         self.0.get(self.)
+//     }
+// }
 
-impl Sub for RgbHistogram {
-    type Output = u64;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        let mut diff = 0;
-        if self.len() != rhs.len() {
-            return Self::Output::MAX;
+impl RgbHistogram {
+    pub fn diff(&self, other: &RgbHistogram) -> u64 {
+        // let mut diff = 0;
+        // if self.len() != other.len() {
+        //     return u64::MAX;
+        // }
+        // for (color, _) in self.iter().enumerate() {
+        //     for (a, b) in self[color].zip(other[color]) {
+        //         diff += (a as i64 - b as i64).abs() as u64;
+        //     }
+        // }
+        // diff
+        if self.len() != other.len() {
+            return u64::MAX;
         }
-        for (color, _) in self.enumerate() {
-            for (a, b) in self[color].zip(rhs[color]) {
-                diff += (a as i64 - b as i64).abs() as u64;
-            }
-        }
-        diff
+        self
+            .iter()
+            .zip(other.iter())
+            .map(|(chan_a, chan_b)| {
+                chan_a
+                    .iter()
+                    .zip(chan_b.iter())
+                    .fold(0i64, |acc, (&value_a, &value_b)| acc + (value_a as i64 - value_b as i64))
+            })
+            .sum::<i64>()
+            .abs() as u64
     }
 }
 
@@ -109,26 +121,26 @@ impl Hash for ImageInfo {
     }
 }
 
-impl ops::Sub for ImageInfo {
-    type Output = u32;
+// impl ops::Sub for ImageInfo {
+//     type Output = u32;
 
-    fn sub(self, rhs: Self) -> Self::Output {
-        if let (Some(hist_a), Some(hist_b)) = (self.histogram, rhs.histogram) {
-            return hist_a
-                .iter()
-                .zip(hist_b)
-                .map(|(chan_a, chan_b)| {
-                    chan_a
-                        .iter()
-                        .zip(chan_b)
-                        .fold(0, |acc, (value_a, value_b)| acc + (value_a - value_b))
-                })
-                .sum();
-        }
-        // Error: return max diff
-        HistogramValueType::MAX
-    }
-}
+//     fn sub(self, rhs: Self) -> Self::Output {
+//         if let (Some(hist_a), Some(hist_b)) = (self.histogram, rhs.histogram) {
+//             return hist_a
+//                 .iter()
+//                 .zip(hist_b)
+//                 .map(|(chan_a, chan_b)| {
+//                     chan_a
+//                         .iter()
+//                         .zip(chan_b)
+//                         .fold(0, |acc, (value_a, value_b)| acc + (value_a - value_b))
+//                 })
+//                 .sum();
+//         }
+//         // Error: return max diff
+//         HistogramValueType::MAX
+//     }
+// }
 
 pub fn get_histograms(paths: &[PathBuf], tx: Sender<Message>, context: &egui::Context) {
     let cpu_count = num_cpus::get();
@@ -139,7 +151,7 @@ pub fn get_histograms(paths: &[PathBuf], tx: Sender<Message>, context: &egui::Co
         let tx = tx.clone();
         let repaint_signal = context.clone();
         pool.execute(move || {
-            let imageinfo = get_imageinfo_from_image(path);
+            let imageinfo = get_imageinfo_from_image(&path);
             tx.send(Message::ImageAnalyzed(imageinfo))
                 .expect("channel will be there waiting for the pool");
             repaint_signal.request_repaint();
@@ -149,14 +161,14 @@ pub fn get_histograms(paths: &[PathBuf], tx: Sender<Message>, context: &egui::Co
     tx.send(Message::ImagesAnalyzed).expect("Message not sent");
 }
 
-pub fn get_imageinfo_from_image(path: PathBuf) -> ImageInfo {
+pub fn get_imageinfo_from_image(path: &PathBuf) -> ImageInfo {
     let mut imageinfo = ImageInfo {
         path: path.into(),
         ..Default::default()
     };
 
     // Load image file
-    let img = match image::open(path) {
+    let img = match image::open(&path) {
         Ok(img) => img,
         Err(error) => {
             imageinfo.error = Some(format!("{error:?}"));
@@ -168,7 +180,7 @@ pub fn get_imageinfo_from_image(path: PathBuf) -> ImageInfo {
     let mut buffer = ImageBuffer::new(img.width(), img.height());
     buffer.copy_from(&img, 0, 0).unwrap();
     let histograms = histogram(&buffer);
-    imageinfo.histogram = Some(histograms.channels);
+    // imageinfo.histogram = Some(histograms.channels);
 
     // Create thumbnail
     let thumb = thumbnail(&img, 100, 100);

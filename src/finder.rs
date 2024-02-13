@@ -1,5 +1,5 @@
 use crate::{image::ImageInfo, Error};
-use std::{collections::HashSet, ops::Deref, path::{Path, PathBuf}};
+use std::{collections::HashSet, ops::{Deref, DerefMut, Sub}, path::{Path, PathBuf}};
 use walkdir;
 
 pub fn find_images<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>, Error> {
@@ -17,13 +17,12 @@ pub fn find_images<P: AsRef<Path>>(path: P) -> Result<Vec<PathBuf>, Error> {
     Ok(files)
 }
 
-pub fn compare_images<'a>(images: &'a [&'a ImageInfo], threshold: u32) -> Vec<Pair<'a>> {
-    let mut pairs: Vec<Pair<'a>> = vec![];
+pub fn compare_images<'a>(images: &'a [&'a ImageInfo]) -> Vec<Pair<'a>> {
     let pairs = images
         .iter()
         .zip(images)
         .filter(|(a, b)| !std::ptr::eq(a, b) && a.histogram.is_some() && b.histogram.is_some())
-        .map(|(a, b)| Pair::new(a, b, a.histogram.unwrap() - b.histogram.unwrap()))
+        .map(|(a, b)| Pair::new(a, b, a.histogram.as_ref().unwrap().diff(b.histogram.as_ref().unwrap())))
         .collect();
     pairs
 }
@@ -43,7 +42,8 @@ pub fn get_groups<'a>(pairs: &'a Vec<Pair<'a>>) -> Vec<ImageInfoGroup<'a>> {
         // If matching items were found in multiple groups, merge those groups
         if pair_in_groups.len() > 1 {
             for group_id in pair_in_groups.iter().skip(1).rev() {
-                groups[pair_in_groups[0]].extend(groups[*group_id].iter());
+                let group = groups[*group_id].clone();
+                groups[pair_in_groups[0]].extend(group.iter());
                 groups.remove(*group_id);
             }
         }
@@ -81,12 +81,18 @@ impl<'a> Deref for ImageInfoGroup<'a> {
     }
 }
 
+impl<'a> DerefMut for ImageInfoGroup<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 impl<'a> ImageInfoGroup<'a> {
     pub fn new() -> Self {
         ImageInfoGroup(HashSet::new())
     }
 
-    pub fn from_vec(values: &[&ImageInfo]) -> Self {
+    pub fn from_vec(values: &'a [&'a ImageInfo]) -> Self {
         let mut group = ImageInfoGroup::new();
         group.extend(values);
         group

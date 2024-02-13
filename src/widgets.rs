@@ -35,7 +35,7 @@ pub fn selectable_image(ui: &mut Ui, imageinfo: &mut ImageInfo) {
     ui.vertical(|ui| {
         // let url = format!("file://{}", path);
         let path = &imageinfo.path.display().to_string();
-        ui.add(Image::from_bytes(path.clone(), imageinfo.thumbnail));
+        // ui.add(Image::from_bytes(path.clone(), imageinfo.thumbnail));
         ui.checkbox(&mut imageinfo.checked, path);
     });
 }
